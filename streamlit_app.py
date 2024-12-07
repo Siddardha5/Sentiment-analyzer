@@ -64,7 +64,7 @@ def extract_product_data(url):
 class ReviewAnalyzer:
     def __init__(self, api_key):
         self.client = ChatOpenAI(openai_api_key=api_key, model_name="gpt-3.5-turbo")
-        self.sentiment_analyzer = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+        self.sentiment_analyzer = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english",, device=-1)
         self.summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
 
     def analyze_reviews(self, data):
