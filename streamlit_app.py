@@ -14,15 +14,20 @@ import numpy as np
 # Suppress tokenizers parallelism warnings
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# Initialize Sentiment Analysis Model
+# Initialize Models
 try:
     sentiment_analyzer = pipeline(
         "sentiment-analysis",
         model="distilbert-base-uncased-finetuned-sst-2-english",
-        device=-1  # Force CPU usage
+        device=-1  # Use CPU
+    )
+    summarizer = pipeline(
+        "summarization",
+        model="sshleifer/distilbart-cnn-12-6",
+        device=-1  # Use CPU
     )
 except Exception as e:
-    st.error(f"Failed to initialize the sentiment analysis model: {e}")
+    st.error(f"Failed to initialize the models: {e}")
 
 # User agents for web scraping
 user_agents = [
@@ -67,6 +72,23 @@ def extract_product_data(url):
         st.error(f"Failed to fetch URL {url}: {e}")
         return None
 
+# Generate summary of reviews
+def generate_summary(reviews, avg_rating):
+    combined_reviews = " ".join(reviews)
+    try:
+        if len(combined_reviews) > 1000:  # Summarize in chunks for large text
+            summary = summarizer(combined_reviews[:1000], max_length=100, min_length=30, do_sample=False)[0]['summary_text']
+        else:
+            summary = summarizer(combined_reviews, max_length=100, min_length=30, do_sample=False)[0]['summary_text']
+        # Add suggestions or strengths based on the average rating
+        if avg_rating < 4:
+            summary += " Suggestions: Improve product durability and customer service."
+        else:
+            summary += " Strengths: Customers appreciate quality and value."
+        return summary
+    except Exception as e:
+        return f"Error generating summary: {e}"
+
 # Visualize word cloud
 def display_wordcloud(reviews, group_name):
     if reviews:
@@ -101,8 +123,16 @@ if url:
     if data:
         # Analyze Sentiment
         reviews = data['reviews']
+        ratings = data['ratings']
         sentiments = [sentiment_analyzer(review)[0]['label'] for review in reviews]
-        sentiment_scores = [sentiment_analyzer(review)[0]['score'] for review in reviews]
+        avg_rating = np.mean(ratings)
+
+        # Generate Summary
+        summary = generate_summary(reviews, avg_rating)
+
+        # Display Summary
+        st.subheader("Overall Summary")
+        st.write(summary)
 
         # Display Overall Sentiment
         st.subheader("Overall Sentiment Analysis")
