@@ -141,8 +141,8 @@ url = st.text_input("Enter the product webpage URL:")
 if url:
     data = extract_product_data(url)
     if data:
-        st.write("Extracted Data:")
-        st.json(data)
+      # st.write("Extracted Data:")
+      #  st.json(data)
 
         analyzer = ReviewAnalyzer(api_key)
         overall_results, individual_results = analyzer.analyze_reviews(data)
