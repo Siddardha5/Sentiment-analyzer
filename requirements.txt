@@ -1,13 +1,7 @@
 streamlit
-openai
-langchain
-langchain-community
-langchain-openai
-pandas
-numpy
-wordcloud
-matplotlib
-beautifulsoup4
-requests
 transformers==4.34.0
 torch==2.0.1
+wordcloud
+matplotlib
+requests
+beautifulsoup4
