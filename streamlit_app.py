@@ -1,10 +1,5 @@
-# Install required libraries via pip (usually, this should be done in terminal or requirements.txt)
-# !pip install langchain langchain_community langchain_openai openai pandas numpy transformers wordcloud matplotlib beautifulsoup4 requests
-
 import streamlit as st
 import openai
-from langchain.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 from transformers import pipeline
 import pandas as pd
 import numpy as np
@@ -12,14 +7,13 @@ from bs4 import BeautifulSoup
 import requests
 import json
 import random
-import matplotlib.pyplot as plt
 from wordcloud import WordCloud
 
 # Set up the DeepAI API key
-openai_api_key = st.secrets["OpenAI_Key"]
-client = ChatDeepAI(openai_api_key=openai_api_key, model_name="gpt-3.5-turbo")
+openai.api_key = st.secrets["OpenAI_Key"]  # Ensure you set your DeepAI API Key in Streamlit secrets
+
+# Initialize sentiment analysis pipeline
 sentiment_analyzer = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
-summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
 
 # User agent rotation
 user_agents = [
@@ -64,22 +58,52 @@ def extract_product_data(url):
         st.error(f"Failed to fetch URL {url}: {e}")
         return None
 
+# Function to summarize reviews using OpenAI
+def summarize_reviews(reviews, avg_rating):
+    prompt = (
+        f"Please summarize the following product reviews in about 100 words. "
+        f"If the average rating is less than 4 out of 5, include suggestions for improvement. "
+        f"If the average rating is 4 or higher, identify what to continue keeping.\n\n"
+        f"Average Rating: {avg_rating}\n"
+        f"Reviews: {', '.join(reviews)}\n\n"
+        "Summary:"
+    )
+    
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",  # or "gpt-4" if you have access to GPT-4
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=150
+    )
+    
+    return response['choices'][0]['message']['content'].strip()
+
 # Function to analyze reviews
 class ReviewAnalyzer:
-    def __init__(self):
-        self.client = client
-
     def analyze_reviews(self, data):
-        aligned_data = self.align_reviews_and_ratings(data)
-        overall_results = self.handle_overall_reviews(aligned_data)
-        individual_results = self.handle_individual_reviews(aligned_data)
-        return overall_results, individual_results
-
-    def align_reviews_and_ratings(self, data):
         checked_data = pd.DataFrame(data)
         checked_data['sentiment'] = checked_data['reviews'].apply(lambda x: sentiment_analyzer(x)[0]['label'])
         checked_data['adjusted_rating'] = checked_data.apply(self.adjust_rating, axis=1)
-        return checked_data
+        
+        avg_rating = np.mean(checked_data['adjusted_rating'])
+        all_reviews = checked_data['reviews'].tolist()
+        
+        summary = summarize_reviews(all_reviews, avg_rating)
+        
+        positive_reviews = checked_data[checked_data['sentiment'] == 'POSITIVE']['reviews'].tolist()
+        negative_reviews = checked_data[checked_data['sentiment'] == 'NEGATIVE']['reviews'].tolist()
+        
+        sentiment_counts = {
+            "Positive": len(positive_reviews),
+            "Negative": len(negative_reviews)
+        }
+        
+        return {
+            "average_rating": avg_rating,
+            "summary": summary,
+            "sentiment_counts": sentiment_counts,
+            "positive_reviews": positive_reviews,
+            "negative_reviews": negative_reviews,
+        }
 
     def adjust_rating(self, row):
         sentiment = row['sentiment']
@@ -93,63 +117,32 @@ class ReviewAnalyzer:
         else:
             return rating
 
-    def handle_overall_reviews(self, checked_data):
-        avg_rating = np.mean(checked_data['adjusted_rating'])
-        all_reviews = " ".join(checked_data['reviews'])
-        summary_prompt = ChatPromptTemplate.from_template(
-            "Summarize the following product reviews in about 100 words. "
-            "If the average rating is less than 4 out of 5, include suggestions to improve. "
-            "If the average rating is 4 or higher, identify what to continue keeping.\n\n"
-            "Average Rating: {rating}\n"
-            "Reviews: {reviews}\n\n"
-            "Summary:"
-        )
-        summary_chain = summary_prompt | self.client
-        summary = summary_chain.invoke({"rating": avg_rating, "reviews": all_reviews})
-        return {
-            "average_rating": avg_rating,
-            "summary": summary.content.strip()
-        }
-
-    def handle_individual_reviews(self, checked_data):
-        positive_reviews = checked_data[checked_data['sentiment'] == 'POSITIVE']['reviews'].tolist()
-        negative_reviews = checked_data[checked_data['sentiment'] == 'NEGATIVE']['reviews'].tolist()
-        sentiment_counts = {
-            "Positive": len(positive_reviews),
-            "Negative": len(negative_reviews)
-        }
-        return {
-            "sentiment_counts": sentiment_counts,
-            "positive_reviews": positive_reviews,
-            "negative_reviews": negative_reviews,
-        }
-
 # Streamlit App
-st.title("Sentiment Analyzer")
+st.title("Sentiment Analyzer with DeepAI")
 url = st.text_input("Enter the product webpage URL:")
 
 if st.button("Analyze Reviews"):
     data = extract_product_data(url)
     if data:
         analyzer = ReviewAnalyzer()
-        overall_results, individual_results = analyzer.analyze_reviews(data)
+        results = analyzer.analyze_reviews(data)
         
         st.subheader("Overall Analysis")
-        st.write(f"Average Rating: {overall_results['average_rating']:.2f}")
+        st.write(f"Average Rating: {results['average_rating']:.2f}")
         st.write("Overall Summary of Reviews:")
-        st.write(overall_results['summary'])
+        st.write(results['summary'])
 
         st.subheader("Sentiment Distribution")
-        st.bar_chart(individual_results['sentiment_counts'])
+        st.bar_chart(results['sentiment_counts'])
 
         # Visualizing word cloud for positive reviews
-        if individual_results['positive_reviews']:
-            wordcloud_positive = WordCloud(width=800, height=400, background_color='white').generate(" ".join(individual_results['positive_reviews']))
+        if results['positive_reviews']:
+            wordcloud_positive = WordCloud(width=800, height=400, background_color='white').generate(" ".join(results['positive_reviews']))
             st.image(wordcloud_positive.to_array(), caption='Word Cloud of Positive Reviews')
         
         # Visualizing word cloud for negative reviews
-        if individual_results['negative_reviews']:
-            wordcloud_negative = WordCloud(width=800, height=400, background_color='white').generate(" ".join(individual_results['negative_reviews']))
+        if results['negative_reviews']:
+            wordcloud_negative = WordCloud(width=800, height=400, background_color='white').generate(" ".join(results['negative_reviews']))
             st.image(wordcloud_negative.to_array(), caption='Word Cloud of Negative Reviews')
     else:
         st.error("No data extracted.")
