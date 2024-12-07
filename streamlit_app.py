@@ -82,7 +82,8 @@ if url:
         reviews = data["reviews"]
 
         # Perform sentiment analysis
-        sentiments = [sentiment_analyzer(review)[0]["label"] for review in reviews]
+        #sentiments = [sentiment_analyzer(review)[0]["label"] for review in reviews]
+        sentiments = [sentiment_analyzer(review, return_tensors=True)[0]["label"] for review in reviews]
         positive_count = sentiments.count("POSITIVE")
         negative_count = sentiments.count("NEGATIVE")
 
