@@ -121,13 +121,11 @@ def visualize_ratings(data):
 def display_wordcloud(reviews, group_name):
     if reviews:
         wordcloud = WordCloud(width=800, height=400, background_color='white').generate(" ".join(reviews))
-        st.subheader(f"Word Cloud of {group_name} Reviews")
         plt.figure(figsize=(10, 5))
         plt.imshow(wordcloud, interpolation='bilinear')
         plt.axis('off')
+        plt.title(f"Word Cloud of {group_name} Reviews")
         st.pyplot(plt)
-    else:
-        st.write(f"No {group_name} reviews to display.")
 
 # Streamlit App Logic
 st.title("Sentiment Analyzer")
@@ -160,8 +158,10 @@ if url:
         # Display Positive and Negative Reviews
         st.subheader("Positive Reviews")
         display_wordcloud(individual_results['positive_reviews'], "Positive")
+        st.write(individual_results['positive_reviews'])
 
         st.subheader("Negative Reviews")
         display_wordcloud(individual_results['negative_reviews'], "Negative")
+        st.write(individual_results['negative_reviews'])
     else:
         st.error("No data could be extracted from the URL.")
