@@ -1,1 +1,12 @@
 streamlit
+openai
+langchain
+langchain-community
+langchain-openai
+pandas
+numpy
+transformers
+wordcloud
+matplotlib
+beautifulsoup4
+requests
