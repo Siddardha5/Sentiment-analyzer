@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from wordcloud import WordCloud
 
 # Set up the DeepAI API key
-openai_api_key = st.secrets["DeepAI_Key"]
+openai_api_key = st.secrets["OpenAI_Key"]
 client = ChatDeepAI(openai_api_key=openai_api_key, model_name="gpt-3.5-turbo")
 sentiment_analyzer = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
 summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
