@@ -5,9 +5,9 @@ langchain-community
 langchain-openai
 pandas
 numpy
-transformers
 wordcloud
 matplotlib
 beautifulsoup4
 requests
-torch 
+transformers==4.34.0
+torch==2.0.1
