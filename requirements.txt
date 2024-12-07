@@ -10,3 +10,4 @@ wordcloud
 matplotlib
 beautifulsoup4
 requests
+pytoch
