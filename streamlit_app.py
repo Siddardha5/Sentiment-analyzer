@@ -1,50 +1,47 @@
 import os
-import json
 import random
 import requests
 import streamlit as st
-from bs4 import BeautifulSoup
+from transformers import pipeline
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
-from transformers import pipeline
-from collections import Counter
-import pandas as pd
-import numpy as np
+import json
+from bs4 import BeautifulSoup
 
 # Suppress tokenizers parallelism warnings
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# Initialize Models
-try:
-    sentiment_analyzer = pipeline(
+# Lazy loading models with caching
+@st.cache_resource
+def get_sentiment_analyzer():
+    return pipeline(
         "sentiment-analysis",
-        model="distilbert-base-uncased-finetuned-sst-2-english",
+        model="nlptown/bert-base-multilingual-uncased-sentiment",
         device=-1  # Use CPU
     )
-    summarizer = pipeline(
+
+@st.cache_resource
+def get_summarizer():
+    return pipeline(
         "summarization",
-        model="sshleifer/distilbart-cnn-12-6",
+        model="sshleifer/distilbart-cnn-6-6",
         device=-1  # Use CPU
     )
-except Exception as e:
-    st.error(f"Failed to initialize the models: {e}")
 
-# User agents for web scraping
-user_agents = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Safari/605.1.15',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0'
-]
+# Load models
+sentiment_analyzer = get_sentiment_analyzer()
+summarizer = get_summarizer()
 
-def get_random_user_agent():
-    return random.choice(user_agents)
-
-# Extract product data
+# Function to extract reviews from the product URL
 def extract_product_data(url):
-    data = {'reviews': [], 'ratings': []}
+    data = {'reviews': []}
     try:
-        headers = {"User-Agent": get_random_user_agent()}
+        headers = {"User-Agent": random.choice([
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Safari/605.1.15',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0'
+        ])}
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
@@ -52,110 +49,70 @@ def extract_product_data(url):
         for tag in script_tags:
             try:
                 data_json = json.loads(tag.string)
-                if isinstance(data_json, dict) and data_json.get("@type") == "Product":
-                    if "review" in data_json:
-                        for review in data_json["review"]:
-                            if isinstance(review, dict):
-                                review_text = review.get("description", "No Review")
-                                rating_value = review.get("reviewRating", {}).get("ratingValue", None)
-                                data['reviews'].append(review_text)
-                                data['ratings'].append(int(rating_value) if rating_value else None)
-                elif isinstance(data_json, dict) and data_json.get("@type") == "Review":
-                    review_text = data_json.get("description", "No Review")
-                    rating_value = data_json.get("reviewRating", {}).get("ratingValue", None)
-                    data['reviews'].append(review_text)
-                    data['ratings'].append(int(rating_value) if rating_value else None)
-            except (json.JSONDecodeError, AttributeError):
+                if isinstance(data_json, dict) and "review" in data_json:
+                    data['reviews'].extend([r["description"] for r in data_json["review"]])
+            except (KeyError, json.JSONDecodeError):
                 continue
         return data
-    except requests.exceptions.RequestException as e:
-        st.error(f"Failed to fetch URL {url}: {e}")
+    except Exception as e:
+        st.error(f"Error fetching data: {e}")
         return None
 
-# Generate summary of reviews
-def generate_summary(reviews, avg_rating):
-    combined_reviews = " ".join(reviews)
-    try:
-        if len(combined_reviews) > 1000:  # Summarize in chunks for large text
-            summary = summarizer(combined_reviews[:1000], max_length=100, min_length=30, do_sample=False)[0]['summary_text']
-        else:
-            summary = summarizer(combined_reviews, max_length=100, min_length=30, do_sample=False)[0]['summary_text']
-        # Add suggestions or strengths based on the average rating
-        if avg_rating < 4:
-            summary += " Suggestions: Improve product durability and customer service."
-        else:
-            summary += " Strengths: Customers appreciate quality and value."
-        return summary
-    except Exception as e:
-        return f"Error generating summary: {e}"
-
 # Visualize word cloud
-def display_wordcloud(reviews, group_name):
+def display_wordcloud(reviews, title):
     if reviews:
-        wordcloud = WordCloud(width=800, height=400, background_color='white').generate(" ".join(reviews))
-        st.subheader(f"Word Cloud of {group_name} Reviews")
+        wordcloud = WordCloud(width=800, height=400, background_color="white").generate(" ".join(reviews))
+        st.subheader(title)
         plt.figure(figsize=(10, 5))
-        plt.imshow(wordcloud, interpolation='bilinear')
-        plt.axis('off')
-        st.pyplot(plt)
+        plt.imshow(wordcloud, interpolation="bilinear")
+        plt.axis("off")
+        st.pyplot()
     else:
-        st.write(f"No {group_name} reviews to display.")
+        st.write(f"No {title} reviews available.")
 
-# Visualize ratings distribution
-def visualize_ratings(data):
-    rating_counts = dict(Counter(data['ratings']))
-    plt.figure(figsize=(10, 6))
-    plt.bar(rating_counts.keys(), rating_counts.values())
-    plt.xlabel("Rating")
-    plt.ylabel("Number of Reviews")
-    plt.title("Distribution of Ratings")
-    st.pyplot(plt)
-
-# Streamlit App Logic
+# Streamlit UI
 st.title("Sentiment Analyzer")
 
-# Product URL Input
+# Input for product URL
 url = st.text_input("Enter the product webpage URL:")
 
 if url:
-    # Extract data
     data = extract_product_data(url)
-    if data:
-        # Analyze Sentiment
-        reviews = data['reviews']
-        ratings = data['ratings']
-        sentiments = [sentiment_analyzer(review)[0]['label'] for review in reviews]
-        avg_rating = np.mean(ratings)
+    if data and "reviews" in data and data["reviews"]:
+        reviews = data["reviews"]
 
-        # Generate Summary
-        summary = generate_summary(reviews, avg_rating)
-
-        # Display Summary
-        st.subheader("Overall Summary")
-        st.write(summary)
-
-        # Display Overall Sentiment
-        st.subheader("Overall Sentiment Analysis")
+        # Perform sentiment analysis
+        sentiments = [sentiment_analyzer(review)[0]["label"] for review in reviews]
         positive_count = sentiments.count("POSITIVE")
         negative_count = sentiments.count("NEGATIVE")
+
+        # Display sentiment analysis results
+        st.subheader("Sentiment Analysis Results")
         st.write(f"Positive Reviews: {positive_count}")
         st.write(f"Negative Reviews: {negative_count}")
 
-        # Visualize Sentiment Distribution
+        # Display sentiment distribution chart
         plt.figure(figsize=(8, 6))
-        plt.bar(['Positive', 'Negative'], [positive_count, negative_count])
+        plt.bar(["Positive", "Negative"], [positive_count, negative_count], color=["green", "red"])
         plt.title("Sentiment Distribution")
         plt.xlabel("Sentiment")
         plt.ylabel("Number of Reviews")
-        st.pyplot(plt)
+        st.pyplot()
 
-        # Visualize Ratings
-        st.subheader("Ratings Distribution")
-        visualize_ratings(data)
+        # Generate a summary of reviews
+        combined_reviews = " ".join(reviews)
+        try:
+            summary = summarizer(combined_reviews, max_length=100, min_length=30, do_sample=False)
+            st.subheader("Summary of Reviews")
+            st.write(summary[0]["summary_text"])
+        except Exception as e:
+            st.error(f"Error generating summary: {e}")
 
-        # Word Clouds for Reviews
+        # Display word clouds for positive and negative reviews
         st.subheader("Word Clouds")
-        display_wordcloud([r for r, s in zip(reviews, sentiments) if s == "POSITIVE"], "Positive")
-        display_wordcloud([r for r, s in zip(reviews, sentiments) if s == "NEGATIVE"], "Negative")
+        positive_reviews = [r for r, s in zip(reviews, sentiments) if s == "POSITIVE"]
+        negative_reviews = [r for r, s in zip(reviews, sentiments) if s == "NEGATIVE"]
+        display_wordcloud(positive_reviews, "Positive Reviews")
+        display_wordcloud(negative_reviews, "Negative Reviews")
     else:
-        st.error("No data could be extracted from the URL.")
+        st.error("No reviews found for the provided URL.")
