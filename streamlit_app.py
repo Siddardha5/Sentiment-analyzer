@@ -17,6 +17,9 @@ import requests
 from bs4 import BeautifulSoup
 import random
 
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 # Initialize OpenAI API key from Streamlit secrets
 openai.api_key = st.secrets["OpenAI_Key"]
 
