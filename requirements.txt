@@ -10,3 +10,4 @@ pandas
 numpy
 beautifulsoup4
 requests
+torch
