@@ -1,23 +1,35 @@
-# Install required packages in a requirements.txt for deployment or via terminal
-# pip install langchain langchain_community langchain_openai openai pandas numpy transformers wordcloud matplotlib beautifulsoup4 requests
-
-# Streamlit imports
+import os
+import json
+import random
+import requests
 import streamlit as st
-import openai
-from langchain.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
-import pandas as pd
-import numpy as np
-from collections import Counter
-from transformers import pipeline
+from bs4 import BeautifulSoup
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
-import json
-import requests
-from bs4 import BeautifulSoup
-import random
+from transformers import pipeline
+from collections import Counter
+import pandas as pd
+import numpy as np
 
-# User agents for rotation
+# Suppress tokenizers parallelism warnings
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+# Initialize Models
+try:
+    sentiment_analyzer = pipeline(
+        "sentiment-analysis",
+        model="distilbert-base-uncased-finetuned-sst-2-english",
+        device=-1  # Use CPU
+    )
+    summarizer = pipeline(
+        "summarization",
+        model="sshleifer/distilbart-cnn-12-6",
+        device=-1  # Use CPU
+    )
+except Exception as e:
+    st.error(f"Failed to initialize the models: {e}")
+
+# User agents for web scraping
 user_agents = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Safari/605.1.15',
@@ -28,7 +40,7 @@ user_agents = [
 def get_random_user_agent():
     return random.choice(user_agents)
 
-# Extract product data from a given URL
+# Extract product data
 def extract_product_data(url):
     data = {'reviews': [], 'ratings': []}
     try:
@@ -60,54 +72,36 @@ def extract_product_data(url):
         st.error(f"Failed to fetch URL {url}: {e}")
         return None
 
-# Review Analyzer Class
-class ReviewAnalyzer:
-    def __init__(self, api_key):
-        self.client = ChatOpenAI(openai_api_key=api_key, model_name="gpt-3.5-turbo")
-        self.sentiment_analyzer = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
-        self.summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
-
-    def analyze_reviews(self, data):
-        aligned_data = self.align_reviews_and_ratings(data)
-        overall_results = self.handle_overall_reviews(aligned_data)
-        individual_results = self.handle_individual_reviews(aligned_data)
-        return overall_results, individual_results
-
-    def align_reviews_and_ratings(self, data):
-        checked_data = pd.DataFrame(data)
-        checked_data['sentiment'] = checked_data['reviews'].apply(lambda x: self.sentiment_analyzer(x)[0]['label'])
-        checked_data['adjusted_rating'] = checked_data.apply(self.adjust_rating, axis=1)
-        return checked_data
-
-    def adjust_rating(self, row):
-        sentiment = row['sentiment']
-        rating = row['ratings']
-        if sentiment == 'POSITIVE' and rating < 4:
-            return 3
-        elif sentiment == 'NEGATIVE' and rating > 2:
-            return 3
+# Generate summary of reviews
+def generate_summary(reviews, avg_rating):
+    combined_reviews = " ".join(reviews)
+    try:
+        if len(combined_reviews) > 1000:  # Summarize in chunks for large text
+            summary = summarizer(combined_reviews[:1000], max_length=100, min_length=30, do_sample=False)[0]['summary_text']
         else:
-            return rating
+            summary = summarizer(combined_reviews, max_length=100, min_length=30, do_sample=False)[0]['summary_text']
+        # Add suggestions or strengths based on the average rating
+        if avg_rating < 4:
+            summary += " Suggestions: Improve product durability and customer service."
+        else:
+            summary += " Strengths: Customers appreciate quality and value."
+        return summary
+    except Exception as e:
+        return f"Error generating summary: {e}"
 
-    def handle_overall_reviews(self, checked_data):
-        avg_rating = np.mean(checked_data['adjusted_rating'])
-        all_reviews = " ".join(checked_data['reviews'])
-        summary_prompt = ChatPromptTemplate.from_template(
-            "Summarize the following product reviews in about 100 words. "
-            "If the average rating is less than 4 out of 5, include suggestions to improve. "
-            "If the average rating is 4 or higher, identify what to continue keeping.\n\n"
-            "Average Rating: {rating}\nReviews: {reviews}\n\nSummary:"
-        )
-        summary_chain = summary_prompt | self.client
-        summary = summary_chain.invoke({"rating": avg_rating, "reviews": all_reviews})
-        return {"average_rating": avg_rating, "summary": summary.content.strip()}
+# Visualize word cloud
+def display_wordcloud(reviews, group_name):
+    if reviews:
+        wordcloud = WordCloud(width=800, height=400, background_color='white').generate(" ".join(reviews))
+        st.subheader(f"Word Cloud of {group_name} Reviews")
+        plt.figure(figsize=(10, 5))
+        plt.imshow(wordcloud, interpolation='bilinear')
+        plt.axis('off')
+        st.pyplot(plt)
+    else:
+        st.write(f"No {group_name} reviews to display.")
 
-    def handle_individual_reviews(self, checked_data):
-        positive_reviews = checked_data[checked_data['sentiment'] == 'POSITIVE']['reviews'].tolist()
-        negative_reviews = checked_data[checked_data['sentiment'] == 'NEGATIVE']['reviews'].tolist()
-        return {"positive_reviews": positive_reviews, "negative_reviews": negative_reviews}
-
-# Visualize ratings
+# Visualize ratings distribution
 def visualize_ratings(data):
     rating_counts = dict(Counter(data['ratings']))
     plt.figure(figsize=(10, 6))
@@ -117,51 +111,51 @@ def visualize_ratings(data):
     plt.title("Distribution of Ratings")
     st.pyplot(plt)
 
-# Display word clouds
-def display_wordcloud(reviews, group_name):
-    if reviews:
-        wordcloud = WordCloud(width=800, height=400, background_color='white').generate(" ".join(reviews))
-        plt.figure(figsize=(10, 5))
-        plt.imshow(wordcloud, interpolation='bilinear')
-        plt.axis('off')
-        plt.title(f"Word Cloud of {group_name} Reviews")
-        st.pyplot(plt)
-
 # Streamlit App Logic
 st.title("Sentiment Analyzer")
-
-# API Key Input
-api_key = st.secrets["OpenAI_Key"]
 
 # Product URL Input
 url = st.text_input("Enter the product webpage URL:")
 
 if url:
+    # Extract data
     data = extract_product_data(url)
     if data:
-       # st.write("Extracted Data:")
-       # st.json(data)
+        # Analyze Sentiment
+        reviews = data['reviews']
+        ratings = data['ratings']
+        sentiments = [sentiment_analyzer(review)[0]['label'] for review in reviews]
+        avg_rating = np.mean(ratings)
 
-        analyzer = ReviewAnalyzer(api_key)
-        overall_results, individual_results = analyzer.analyze_reviews(data)
+        # Generate Summary
+        summary = generate_summary(reviews, avg_rating)
 
-        # Display Overall Results
-        st.subheader("Overall Results")
-        st.write(f"Average Rating: {overall_results['average_rating']:.2f}")
-        st.write("Summary:")
-        st.write(overall_results['summary'])
+        # Display Summary
+        st.subheader("Overall Summary")
+        st.write(summary)
+
+        # Display Overall Sentiment
+        st.subheader("Overall Sentiment Analysis")
+        positive_count = sentiments.count("POSITIVE")
+        negative_count = sentiments.count("NEGATIVE")
+        st.write(f"Positive Reviews: {positive_count}")
+        st.write(f"Negative Reviews: {negative_count}")
+
+        # Visualize Sentiment Distribution
+        plt.figure(figsize=(8, 6))
+        plt.bar(['Positive', 'Negative'], [positive_count, negative_count])
+        plt.title("Sentiment Distribution")
+        plt.xlabel("Sentiment")
+        plt.ylabel("Number of Reviews")
+        st.pyplot(plt)
 
         # Visualize Ratings
         st.subheader("Ratings Distribution")
         visualize_ratings(data)
 
-        # Display Positive and Negative Reviews
-        st.subheader("Positive Reviews")
-        display_wordcloud(individual_results['positive_reviews'], "Positive")
-        st.write(individual_results['positive_reviews'])
-
-        st.subheader("Negative Reviews")
-        display_wordcloud(individual_results['negative_reviews'], "Negative")
-        st.write(individual_results['negative_reviews'])
+        # Word Clouds for Reviews
+        st.subheader("Word Clouds")
+        display_wordcloud([r for r, s in zip(reviews, sentiments) if s == "POSITIVE"], "Positive")
+        display_wordcloud([r for r, s in zip(reviews, sentiments) if s == "NEGATIVE"], "Negative")
     else:
         st.error("No data could be extracted from the URL.")
