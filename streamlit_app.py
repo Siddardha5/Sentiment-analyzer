@@ -1,4 +1,4 @@
-Working code v1
+
 # Install required packages in a requirements.txt for deployment or via terminal
 # pip install langchain langchain_community langchain_openai openai pandas numpy transformers wordcloud matplotlib beautifulsoup4 requests
 
